@@ -503,7 +503,7 @@ function preload_wheels_for_tox() {
         fi
     fi
     if test "$require" && ! test -d wheelhouse ; then
-        for interpreter in python2.7 python3 ; do
+        for interpreter in python3 python2.7 ; do
             type $interpreter > /dev/null 2>&1 || continue
             activate_virtualenv $top_srcdir $interpreter || exit 1
             populate_wheelhouse "wheel -w $wip_wheelhouse" $require $constraint || exit 1
