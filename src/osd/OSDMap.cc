@@ -2305,6 +2305,8 @@ int OSDMap::map_to_pg(
   else
     ps = pool->hash_key(name, nspace);
   *pg = pg_t(ps, poolid);
+  pg->m_oid = object_t(name);
+  pg->m_loc = object_locator_t(poolid, nspace, !key.empty() ? key : name);
   return 0;
 }
 
@@ -2316,6 +2318,8 @@ int OSDMap::object_locator_to_pg(
       return -ENOENT;
     }
     pg = pg_t(loc.hash, loc.get_pool());
+    pg.m_oid = oid;
+    pg.m_loc = loc;
     return 0;
   }
   return map_to_pg(loc.get_pool(), oid.name, loc.key, loc.nspace, &pg);
@@ -2370,6 +2374,62 @@ void OSDMap::_pg_to_raw_osds(
   int ruleno = crush->find_rule(pool.get_crush_rule(), pool.get_type(), size);
   if (ruleno >= 0)
     crush->do_rule(ruleno, pps, *osds, size, osd_weight, pg.pool());
+
+  /****************** smdsbz mod ********************/
+  if (pool.is_tier() && !osds->empty()) {
+    // get original object locator, and repurpose it to base tier
+    auto loc = pg.m_loc;
+    loc.pool = pool.tier_of;
+
+    // calculate base tier pg
+    auto pbase_pool = get_pg_pool(loc.pool);
+    ceph_assert(pbase_pool != NULL);
+    auto base_pg = object_locator_to_pg(pg.m_oid, loc);
+
+    // calculate base tier primary osd
+    vector<int> base_osds;
+    // TODO: [perf] only calculate primary
+    _pg_to_raw_osds(*pbase_pool, base_pg, &base_osds, NULL);
+
+    // find its host
+    if (base_osds.empty())
+      return;
+    auto base_primary_osd = base_osds.front();
+    auto host = crush->get_parent_of_type(base_primary_osd, crush->get_type_id("host"));
+    if (host == 0)
+      return;
+
+    // find osd of higher performance on same host
+    vector<int> osds_on_host;
+    crush->get_children_of_type(host, 0/*osd*/, &osds_on_host);
+    // TODO: [feat] use hash instead of first
+    int first_ssd_on_host = -1;   // -1 for not found
+    for (auto& osd : osds_on_host) {
+      if (crush->get_item_class_id(osd) == crush->get_class_id("ssd")) {
+	first_ssd_on_host = osd;
+	break;
+      }
+    }
+
+    // if any, prepend aligned osd to output list
+    if (first_ssd_on_host != -1) {
+      // check if already in non-modified output list
+      int place = -1;   // -1 for not found
+      for (unsigned it = 0; it != osds->size(); ++it) {
+	if (osds->operator[](it) == first_ssd_on_host) {
+	  place = it;
+	  break;
+	}
+      }
+      // if not present in list, replace primary with aligned osd
+      if (place == -1)
+	osds->operator[](0) = first_ssd_on_host;
+      // if present in list, swap with the original primary
+      else
+	std::swap(osds->operator[](0), osds->operator[](place));
+    }
+  }
+  /**************** end smdsbz mod ******************/
 
   _remove_nonexistent_osds(pool, *osds);
 

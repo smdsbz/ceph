@@ -392,10 +392,14 @@ WRITE_CLASS_ENCODER(old_pg_t)
 struct pg_t {
   uint64_t m_pool;
   uint32_t m_seed;
+  /****************** smdsbz mod ********************/
+  object_t m_oid;
+  object_locator_t m_loc;
+  /**************** end smdsbz mod ******************/
 
-  pg_t() : m_pool(0), m_seed(0) {}
+  pg_t() : m_pool(0), m_seed(0), m_oid(), m_loc() {}
   pg_t(ps_t seed, uint64_t pool) :
-    m_pool(pool), m_seed(seed) {}
+    m_pool(pool), m_seed(seed), m_oid(), m_loc() {}
   // cppcheck-suppress noExplicitConstructor
   pg_t(const ceph_pg& cpg) :
     m_pool(cpg.pool), m_seed(cpg.ps) {}
