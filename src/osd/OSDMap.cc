@@ -2376,7 +2376,7 @@ void OSDMap::_pg_to_raw_osds(
     crush->do_rule(ruleno, pps, *osds, size, osd_weight, pg.pool());
 
   /****************** smdsbz mod ********************/
-  if (pool.is_tier() && !osds->empty()) {
+  if (pool.can_shift_osds() && pool.is_tier() && !osds->empty()) {
     // get original object locator, and repurpose it to base tier
     auto loc = pg.m_loc;
     loc.pool = pool.tier_of;
@@ -2402,7 +2402,7 @@ void OSDMap::_pg_to_raw_osds(
     // find osd of higher performance on same host
     vector<int> osds_on_host;
     crush->get_children_of_type(host, 0/*osd*/, &osds_on_host);
-    // TODO: [feat] use hash instead of first
+    // TODO: [feat] use crush_bucket_choose() instead of naiively choosing first
     int first_ssd_on_host = -1;   // -1 for not found
     for (auto& osd : osds_on_host) {
       if (crush->get_item_class_id(osd) == crush->get_class_id("ssd")) {
