@@ -2376,7 +2376,11 @@ void OSDMap::_pg_to_raw_osds(
     crush->do_rule(ruleno, pps, *osds, size, osd_weight, pg.pool());
 
   /****************** smdsbz mod ********************/
-  if (pool.can_shift_osds() && pool.is_tier() && !osds->empty()) {
+  auto type_host_id = crush->get_type_id("host");
+  auto class_ssd_id = crush->get_class_id("ssd");
+  if (pool.can_shift_osds() && pool.is_tier()
+      && type_host_id != -1 && class_ssd_id != -EINVAL
+      && !osds->empty()) {
     // get original object locator, and repurpose it to base tier
     auto loc = pg.m_loc;
     loc.pool = pool.tier_of;
@@ -2392,38 +2396,55 @@ void OSDMap::_pg_to_raw_osds(
     _pg_to_raw_osds(*pbase_pool, base_pg, &base_osds, NULL);
 
     // find its host
-    if (base_osds.empty())
+    if (base_osds.empty()) {
+      _remove_nonexistent_osds(pool, *osds);
+      if (ppps)
+	*ppps = pps;
       return;
+    }
     auto base_primary_osd = base_osds.front();
-    auto host = crush->get_parent_of_type(base_primary_osd, crush->get_type_id("host"));
-    if (host == 0)
+    auto host = crush->get_parent_of_type(base_primary_osd, type_host_id);
+    if (host == 0) {
+      _remove_nonexistent_osds(pool, *osds);
+      if (ppps)
+	*ppps = pps;
       return;
-
-    // find osd of higher performance on same host
-    vector<int> osds_on_host;
-    crush->get_children_of_type(host, 0/*osd*/, &osds_on_host);
-    // TODO: [feat] use crush_bucket_choose() instead of naiively choosing first
-    int first_ssd_on_host = -1;   // -1 for not found
-    for (auto& osd : osds_on_host) {
-      if (crush->get_item_class_id(osd) == crush->get_class_id("ssd")) {
-	first_ssd_on_host = osd;
-	break;
-      }
     }
 
+    // find osd of higher performance on same host
+    if (crush->class_bucket.count(host) == 0
+	|| crush->class_bucket.at(host).count(class_ssd_id) == 0) {
+      _remove_nonexistent_osds(pool, *osds);
+      if (ppps)
+	*ppps = pps;
+      return;
+    }
+    auto ssd_shadow_host = crush->class_bucket.at(host).at(class_ssd_id);
+
+    vector<int> ssds_on_host;
+    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
+    // TODO: [feat] use crush_bucket_choose() instead of naiively choosing first
+    if (ssds_on_host.empty()) {
+      _remove_nonexistent_osds(pool, *osds);
+      if (ppps)
+	*ppps = pps;
+      return;
+    }
+    auto ssd_on_host = ssds_on_host.front();
+
     // if any, prepend aligned osd to output list
-    if (first_ssd_on_host != -1) {
+    if (ssd_on_host != -1) {
       // check if already in non-modified output list
       int place = -1;   // -1 for not found
       for (unsigned it = 0; it != osds->size(); ++it) {
-	if (osds->operator[](it) == first_ssd_on_host) {
+	if (osds->operator[](it) == ssd_on_host) {
 	  place = it;
 	  break;
 	}
       }
       // if not present in list, replace primary with aligned osd
       if (place == -1)
-	osds->operator[](0) = first_ssd_on_host;
+	osds->operator[](0) = ssd_on_host;
       // if present in list, swap with the original primary
       else
 	std::swap(osds->operator[](0), osds->operator[](place));
