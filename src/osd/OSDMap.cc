@@ -2423,14 +2423,15 @@ void OSDMap::_pg_to_raw_osds(
 
     vector<int> ssds_on_host;
     crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
-    // TODO: [feat] use crush_bucket_choose() instead of naiively choosing first
+    // TODO: [feat] use crush_bucket_choose() instead of naiively random
+    // sampling not considering item weight
     if (ssds_on_host.empty()) {
       _remove_nonexistent_osds(pool, *osds);
       if (ppps)
 	*ppps = pps;
       return;
     }
-    auto ssd_on_host = ssds_on_host.front();
+    auto ssd_on_host = ssds_on_host[pps % ssds_on_host.size()];
 
     // if any, prepend aligned osd to output list
     if (ssd_on_host != -1) {
