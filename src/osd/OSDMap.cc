@@ -2361,6 +2361,15 @@ void OSDMap::_remove_nonexistent_osds(const pg_pool_t& pool,
   }
 }
 
+extern "C" {
+  int crush_bucket_choose(
+      const struct crush_bucket *in,
+      struct crush_work_bucket *work,
+      int x, int r,
+      const struct crush_choose_arg *arg,
+      int position);
+}
+
 void OSDMap::_pg_to_raw_osds(
   const pg_pool_t& pool, pg_t pg,
   vector<int> *osds,
@@ -2427,17 +2436,30 @@ void OSDMap::_pg_to_raw_osds(
       return;
     }
     auto ssd_shadow_host = crush->class_bucket.at(host).at(class_ssd_id);
-    vector<int> ssds_on_host;
-    // TODO: [feat] use crush_bucket_choose() instead of naiively random
-    // sampling not considering item weight
-    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
-    if (ssds_on_host.empty()) {
-      _remove_nonexistent_osds(pool, *osds);
-      if (ppps)
-	*ppps = pps;
-      return;
-    }
-    auto ssd_on_host = ssds_on_host[pps % ssds_on_host.size()];
+//    vector<int> ssds_on_host;
+//    // TODO: [feat] use crush_bucket_choose() instead of naiively random
+//    // sampling not considering item weight
+//    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
+//    if (ssds_on_host.empty()) {
+//      _remove_nonexistent_osds(pool, *osds);
+//      if (ppps)
+//	*ppps = pps;
+//      return;
+//    }
+//    auto ssd_on_host = ssds_on_host[pps % ssds_on_host.size()];
+    struct crush_map *crush_map = crush->get_crush_map();
+    ceph_assert(crush_map != NULL);
+    auto ssd_shadow_host_bucket = crush_map->buckets[ssd_shadow_host];
+    char work[crush_work_size(crush_map, 1)];   // VLA
+    crush_init_workspace(crush_map, work);
+    auto arg_map = crush->choose_args_get_with_fallback(pg.pool());
+    int ssd_on_host = crush_bucket_choose(
+      /*in=*/ssd_shadow_host_bucket,
+      /*work=*/((struct crush_work*)work)->work[-1-ssd_shadow_host_bucket->id],
+      /*x=*/pps, /*r=*/0,
+      /*arg=*/&arg_map.args[-1-ssd_shadow_host_bucket->id],
+      /*position=*/0
+    );
 
     // if any, prepend aligned osd to output list
     if (ssd_on_host != -1) {

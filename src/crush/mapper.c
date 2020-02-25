@@ -384,7 +384,7 @@ static int bucket_straw2_choose(const struct crush_bucket_straw2 *bucket,
 }
 
 
-static int crush_bucket_choose(const struct crush_bucket *in,
+/*static*/ int crush_bucket_choose(const struct crush_bucket *in,
 			       struct crush_work_bucket *work,
 			       int x, int r,
                                const struct crush_choose_arg *arg,
