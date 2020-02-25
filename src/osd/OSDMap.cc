@@ -2376,9 +2376,9 @@ void OSDMap::_pg_to_raw_osds(
     crush->do_rule(ruleno, pps, *osds, size, osd_weight, pg.pool());
 
   /****************** smdsbz mod ********************/
-  auto type_host_id = crush->get_type_id("host");
-  auto class_ssd_id = crush->get_class_id("ssd");
-  if (pool.can_shift_osds() && pool.is_tier()
+  const auto type_host_id = crush->get_type_id("host");
+  const auto class_ssd_id = crush->get_class_id("ssd");
+  if (pool.is_tier() && pool.can_shift_osds()
       && type_host_id != -1 && class_ssd_id != -EINVAL
       && !osds->empty()) {
     // get original object locator, and repurpose it to base tier
@@ -2392,8 +2392,16 @@ void OSDMap::_pg_to_raw_osds(
 
     // calculate base tier primary osd
     vector<int> base_osds;
-    // TODO: [perf] only calculate primary
-    _pg_to_raw_osds(*pbase_pool, base_pg, &base_osds, NULL);
+    int base_ruleno = crush->find_rule(pbase_pool->get_crush_rule(),
+   	pbase_pool->get_type(), pbase_pool->get_size());
+    if (base_ruleno < 0) {
+      _remove_nonexistent_osds(pool, *osds);
+      if (ppps)
+	*ppps = pps;
+      return;
+    }
+    crush->do_rule(base_ruleno, pbase_pool->raw_pg_to_pps(base_pg), base_osds,
+	1, osd_weight, base_pg.pool());
 
     // find its host
     if (base_osds.empty()) {
@@ -2402,8 +2410,7 @@ void OSDMap::_pg_to_raw_osds(
 	*ppps = pps;
       return;
     }
-    auto base_primary_osd = base_osds.front();
-    auto host = crush->get_parent_of_type(base_primary_osd, type_host_id);
+    auto host = crush->get_parent_of_type(base_osds[0], type_host_id);
     if (host == 0) {
       _remove_nonexistent_osds(pool, *osds);
       if (ppps)
@@ -2420,11 +2427,10 @@ void OSDMap::_pg_to_raw_osds(
       return;
     }
     auto ssd_shadow_host = crush->class_bucket.at(host).at(class_ssd_id);
-
     vector<int> ssds_on_host;
-    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
     // TODO: [feat] use crush_bucket_choose() instead of naiively random
     // sampling not considering item weight
+    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
     if (ssds_on_host.empty()) {
       _remove_nonexistent_osds(pool, *osds);
       if (ppps)
