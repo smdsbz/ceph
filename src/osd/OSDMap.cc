@@ -2436,17 +2436,19 @@ void OSDMap::_pg_to_raw_osds(
       return;
     }
     auto ssd_shadow_host = crush->class_bucket.at(host).at(class_ssd_id);
-//    vector<int> ssds_on_host;
-//    // TODO: [feat] use crush_bucket_choose() instead of naiively random
-//    // sampling not considering item weight
-//    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
-//    if (ssds_on_host.empty()) {
-//      _remove_nonexistent_osds(pool, *osds);
-//      if (ppps)
-//	*ppps = pps;
-//      return;
-//    }
-//    auto ssd_on_host = ssds_on_host[pps % ssds_on_host.size()];
+#if 1
+    vector<int> ssds_on_host;
+    // TODO: [feat] use crush_bucket_choose() instead of naiively random
+    // sampling not considering item weight
+    crush->get_children_of_type(ssd_shadow_host, 0/*osd or leaf*/, &ssds_on_host);
+    if (ssds_on_host.empty()) {
+      _remove_nonexistent_osds(pool, *osds);
+      if (ppps)
+	*ppps = pps;
+      return;
+    }
+    auto ssd_on_host = ssds_on_host[pps % ssds_on_host.size()];
+#else
     struct crush_map *crush_map = crush->get_crush_map();
     ceph_assert(crush_map != NULL);
     auto ssd_shadow_host_bucket = crush_map->buckets[ssd_shadow_host];
@@ -2460,6 +2462,7 @@ void OSDMap::_pg_to_raw_osds(
       /*arg=*/&arg_map.args[-1-ssd_shadow_host_bucket->id],
       /*position=*/0
     );
+#endif
 
     // if any, prepend aligned osd to output list
     if (ssd_on_host != -1) {
